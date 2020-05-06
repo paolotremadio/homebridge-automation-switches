@@ -1,29 +1,23 @@
 'use strict';
 
-const clone = require('clone');
-
 let Accessory, Characteristic, Service;
 
-class SwitchAccessory {
+class RandomAccessory {
 
-  constructor(api, log, config, storage) {
+  constructor(api, log, config) {
     Accessory = api.hap.Accessory;
     Characteristic = api.hap.Characteristic;
     Service = api.hap.Service;
 
     this.log = log;
     this.name = config.name;
-    this._config = config;
+    this.config = config;
 
-    this._storage = storage;
-
-    const defaultValue = {
-      state: config.default === undefined ? false : config.default
+    this._state = {
+      randomValue: 0,
     };
 
-    storage.retrieve(defaultValue, (error, value) => {
-      this._state = value;
-    });
+    this._maxValue = config.max || 1;
 
     this._services = this.createServices();
   }
@@ -36,7 +30,7 @@ class SwitchAccessory {
     return [
       this.getAccessoryInformationService(),
       this.getBridgingStateService(),
-      this.getSwitchService()
+      this.getSwitchService(),
     ];
   }
 
@@ -45,9 +39,9 @@ class SwitchAccessory {
       .setCharacteristic(Characteristic.Name, this.name)
       .setCharacteristic(Characteristic.Manufacturer, 'Michael Froehlich')
       .setCharacteristic(Characteristic.Model, 'Switch')
-      .setCharacteristic(Characteristic.SerialNumber, this._config.serialNumber)
-      .setCharacteristic(Characteristic.FirmwareRevision, this._config.version)
-      .setCharacteristic(Characteristic.HardwareRevision, this._config.version);
+      .setCharacteristic(Characteristic.SerialNumber, this.config.serialNumber)
+      .setCharacteristic(Characteristic.FirmwareRevision, this.config.version)
+      .setCharacteristic(Characteristic.HardwareRevision, this.config.version);
   }
 
   getBridgingStateService() {
@@ -61,8 +55,9 @@ class SwitchAccessory {
   getSwitchService() {
     this._switchService = new Service.Switch(this.name);
     this._switchService.getCharacteristic(Characteristic.On)
-      .on('set', this._setState.bind(this))
-      .updateValue(this._state.state);
+      .on('set', this._setState.bind(this));
+
+    this._switchService.addCharacteristic(Characteristic.RandomValue);
 
     this._switchService.isPrimaryService = true;
 
@@ -74,26 +69,32 @@ class SwitchAccessory {
     callback();
   }
 
+  _pickRandomValue() {
+    const minValue = 1;
+    const maxValue = this._maxValue;
+
+    this._state.randomValue = parseInt(Math.floor(Math.random() * (maxValue - minValue + 1) + minValue));
+    this.log(`Picked random value: ${this._state.randomValue}`);
+
+    this._switchService
+      .getCharacteristic(Characteristic.RandomValue)
+      .updateValue(this._state.randomValue);
+  }
+
   _setState(value, callback) {
     this.log(`Change target state of ${this.name} to ${value}`);
 
-    const data = clone(this._state);
-    data.state = value;
+    if (value) {
+      this._pickRandomValue();
 
-    this._persist(data, callback);
-  }
+      // Turn off the switch after 1 second
+      setTimeout(() => {
+        this._switchService.setCharacteristic(Characteristic.On, false);
+      }, 1000);
+    }
 
-  _persist(data, callback) {
-    this._storage.store(data, (error) => {
-      if (error) {
-        callback(error);
-        return;
-      }
-
-      this._state = data;
-      callback();
-    });
+    callback();
   }
 }
 
-module.exports = SwitchAccessory;
+module.exports = RandomAccessory;
